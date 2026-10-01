@@ -53,7 +53,25 @@ def translate_and_summarise(title,summary):
     )
     r=requests.post("https://api.openai.com/v1/responses",
       headers={"Authorization":f"Bearer {OPENAI_API_KEY}","Content-Type":"application/json"},
-      json={"model":"gpt-5.6-luna","input":prompt,"max_output_tokens":350},timeout=45)
+      json={
+        "model":"gpt-5.6-luna",
+        "input":prompt,
+        "max_output_tokens":700,
+        "text":{"format":{
+          "type":"json_schema",
+          "name":"iranuknews_translation",
+          "strict":True,
+          "schema":{
+            "type":"object",
+            "properties":{
+              "fa_title":{"type":"string"},
+              "fa_summary":{"type":"string"}
+            },
+            "required":["fa_title","fa_summary"],
+            "additionalProperties":False
+          }
+        }}
+      },timeout=45)
     r.raise_for_status()
     data=r.json(); text=data.get("output_text","")
     if not text:
