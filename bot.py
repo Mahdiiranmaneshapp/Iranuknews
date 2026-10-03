@@ -30,15 +30,55 @@ def relevant(title,summary):
 def load_state():
     try:
         raw=json.loads(STATE.read_text())
-        if isinstance(raw,list): return {"seen":raw,"posts":[]}
-        return {"seen":raw.get("seen",[]),"posts":raw.get("posts",[])}
-    except: return {"seen":[],"posts":[]}
+        if isinstance(raw,list): return {"seen":raw,"posts":[],"stories":[]}
+        return {"seen":raw.get("seen",[]),"posts":raw.get("posts",[]),"stories":raw.get("stories",[])}
+    except: return {"seen":[],"posts":[],"stories":[]}
 
 def save_state(state):
-    STATE.write_text(json.dumps({"seen":state["seen"][-2000:],"posts":state["posts"][-200:]},ensure_ascii=False))
+    STATE.write_text(json.dumps({
+        "seen":state["seen"][-2000:],
+        "posts":state["posts"][-200:],
+        "stories":state.get("stories",[])[-300:]
+    },ensure_ascii=False))
 
 def clean_text(s):
     return re.sub(r"<[^>]+>"," ",s or "").replace("&nbsp;"," ").strip()
+
+GENERIC_STORY_WORDS={
+    "the","a","an","to","of","in","on","for","over","and","or","with","from","as","at","by",
+    "after","before","new","says","say","uk","u","k","britain","british","england","iran",
+    "iranian","iranians","news","com","fr"
+}
+
+STORY_NORMALISE={
+    "nationals":"people","national":"people","men":"people","man":"people",
+    "charged":"charge","charges":"charge","charging":"charge",
+    "plotting":"plot","planned":"plot","planning":"plot","plots":"plot",
+    "terrorism":"terror","terrorist":"terror","terrorists":"terror",
+    "jews":"jewish","community":"community",
+    "attacks":"attack","attacking":"attack","targeting":"target","targeted":"target"
+}
+
+def story_words(title):
+    # Google News commonly appends " - Publisher"; publisher must not affect matching.
+    title=re.sub(r"\s+-\s+[^-]+$","",clean_text(title).lower())
+    words=re.findall(r"[a-z0-9]+",title)
+    out=set()
+    for w in words:
+        if w in GENERIC_STORY_WORDS or len(w)<3:
+            continue
+        out.add(STORY_NORMALISE.get(w,w))
+    return out
+
+def same_story(a,b):
+    A,B=story_words(a),story_words(b)
+    if not A or not B:
+        return False
+    common=len(A & B)
+    smaller=min(len(A),len(B))
+    union=len(A | B)
+    # Conservative threshold: several matching facts are needed.
+    return common >= 4 and (common/smaller >= 0.50 or common/union >= 0.40)
 
 def translate_and_summarise(title,summary):
     if not OPENAI_API_KEY: raise RuntimeError("OPENAI_API_KEY is missing")
@@ -100,6 +140,14 @@ def send(item,source):
 def main():
     if not TOKEN: raise RuntimeError("TELEGRAM_BOT_TOKEN is missing")
     state=load_state(); seen=set(state["seen"]); now=datetime.now(timezone.utc); cutoff=now-timedelta(hours=24)
+    story_cutoff=now-timedelta(hours=36)
+    stories=[]
+    for s in state.get("stories",[]):
+        try:
+            if datetime.fromisoformat(s["time"])>story_cutoff:
+                stories.append(s)
+        except:
+            pass
     recent=[]
     for x in state["posts"]:
         try:
@@ -118,11 +166,22 @@ def main():
             title=item.get("title",""); summary=item.get("summary","")
             if not relevant(title,summary): continue
             key=hashlib.sha256((item.get("link","")+title).encode()).hexdigest()
-            if key in seen: continue
-            send(item,source); seen.add(key); recent.append(now.isoformat()); sent+=1
-            print("Published:",title)
+            if key in seen:
+                continue
+            if any(same_story(title,s.get("title","")) for s in stories):
+                print("Duplicate story skipped:",title)
+                seen.add(key)
+                continue
+            try:
+                send(item,source)
+                seen.add(key); recent.append(now.isoformat()); sent+=1
+                stories.append({"title":title,"time":now.isoformat()})
+                print("Published:",title)
+            except Exception as e:
+                print(f"Skipped failed item: {title} | {type(e).__name__}: {e}")
+                continue
         if sent>=allowance: break
-    state["seen"]=list(seen); state["posts"]=recent; save_state(state)
+    state["seen"]=list(seen); state["posts"]=recent; state["stories"]=stories; save_state(state)
     print(f"Published {sent} item(s)")
 
 if __name__=="__main__": main()
