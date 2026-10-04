@@ -5,7 +5,7 @@ from urllib.parse import quote_plus
 import feedparser, requests
 
 TOKEN=os.environ.get("TELEGRAM_BOT_TOKEN")
-OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")
+OPENAI_API_KEY=os.environ.get("OPENAI_API_KEY")\nAI_ENABLED=False  # Paused by owner; do not call OpenAI until explicitly re-enabled.
 CHANNEL=os.environ.get("TELEGRAM_CHANNEL","@iranuknews")
 STATE=Path("seen.json")
 DAILY_LIMIT=15
